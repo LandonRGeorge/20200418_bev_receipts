@@ -1,2 +1,9 @@
+<<<<<<< HEAD
 .DS_Store
 .vscode
+=======
+.DS_Store
+.vscode
+
+venv
+>>>>>>> a9f2f98b7d81036a418783b960ce4b0fb58e83f4

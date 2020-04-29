@@ -1,4 +1,3 @@
-# %%
 import json
 import os
 import re
@@ -21,8 +20,6 @@ pd.set_option('display.max_rows', 100)
 
 url_base = "https://data.texas.gov/resource/naix-2893.json?"
 
-
-# %%
 def df_cities():
     url_args = f"""
         $select=distinct location_city&$limit=10000
@@ -35,12 +32,6 @@ def df_cities():
     return pd.read_json(url_full).rename(columns={'location_city':'City'})
 
 df_cities = df_cities()
-df_cities.head()
-
-
-
-
-# %%
 
 def func_df_data(cities, segment):
     """Grab data from TX Comptroller API"""
@@ -157,13 +148,10 @@ def func_df_data(cities, segment):
     return df
 
 df_data = func_df_data(cities=[], segment='TOTAL')
-df_data.head()
-
-
-# %%
 
 
 app = dash.Dash(__name__)
+server = app.server # the Flask app
 
 app.layout = html.Div([
     html.H1('Mixed Beverage Gross Receipts'),
