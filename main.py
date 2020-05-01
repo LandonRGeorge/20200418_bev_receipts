@@ -36,8 +36,10 @@ def df_cities():
 
 df_cities = df_cities()
 
-def func_df_data(cities, segment):
+def func_df_data(cities, segment, retailer):
     """Grab data from TX Comptroller API"""
+
+    print('inside func_df_data',cities, segment, retailer)
 
     segment_dict = ({
         'TOTAL':'sum_total_receipts',
@@ -54,7 +56,38 @@ def func_df_data(cities, segment):
             text_temp+=','
         text_cities+=text_temp
 
-    if cities:
+    if cities and retailer:
+        print('cities = True')
+
+        url_args = f"""
+            $select=
+                location_name,
+                tabc_permit_number,
+                location_number,
+                location_address,
+                location_city,
+                min(obligation_end_date_yyyymmdd),
+                max(obligation_end_date_yyyymmdd),
+                sum(total_receipts),
+                sum(beer_receipts),
+                sum(wine_receipts),
+                sum(liquor_receipts)
+            &$group=
+                location_name,
+                tabc_permit_number,
+                location_number,
+                location_address,
+                location_city
+            &$where=
+                obligation_end_date_yyyymmdd between '2020-02-01' and '2020-02-29'
+                and location_city in({text_cities})
+                and location_name like '%25{retailer}%25'
+            &$order={segment_dict[segment]} DESC
+            &$limit=100
+        """
+
+    elif cities:
+        print('cities = True')
 
         url_args = f"""
             $select=
@@ -82,7 +115,41 @@ def func_df_data(cities, segment):
             &$limit=100
         """
 
+
+    elif retailer:
+
+        print('retailer = True')
+
+        url_args = f"""
+            $select=
+                location_name,
+                tabc_permit_number,
+                location_number,
+                location_address,
+                location_city,
+                min(obligation_end_date_yyyymmdd),
+                max(obligation_end_date_yyyymmdd),
+                sum(total_receipts),
+                sum(beer_receipts),
+                sum(wine_receipts),
+                sum(liquor_receipts)
+            &$group=
+                location_name,
+                tabc_permit_number,
+                location_number,
+                location_address,
+                location_city
+            &$where=
+                obligation_end_date_yyyymmdd between '2020-01-01' and '2020-12-31'
+                and location_name like '%25{retailer}%25'
+            &$order={segment_dict[segment]} DESC
+            &$limit=100
+        """
+
     else:
+
+        print('city and retailer = False')
+
         url_args = f"""
             $select=
                 location_name,
@@ -112,6 +179,7 @@ def func_df_data(cities, segment):
     url_args = re.sub(r'\n\s*', '', url_args).replace(' ', '%20')
 
     url_full = url_base + url_args
+    print(url_full)
 
     df = (
         pd.read_json(
@@ -156,8 +224,7 @@ def func_df_data(cities, segment):
 
     return df
 
-df_data = func_df_data(cities=[], segment='TOTAL')
-#%%
+df_data = func_df_data(cities=[], segment='TOTAL', retailer=None)
 
 #%%
 
@@ -196,7 +263,10 @@ app.layout = html.Div([
                 {'label':'Liquor', 'value':'LIQUOR'}],
             value='TOTAL',
             # labelStyle={'display': 'inline-block'}
-        )
+        ),
+        html.Br(),
+        html.Label(html.Strong('If desired, search for a retailer by name (must hit `enter`):')),
+        dcc.Input(id="selection-retailer", type="text", placeholder="", debounce=True),
     ]),
     html.Br(),
     dash_table.DataTable(
@@ -239,12 +309,14 @@ app.layout = html.Div([
 @app.callback(
     Output('table', 'data'),
     [Input('selection-cities', 'value'),
-     Input('selection-segment', 'value')])
-def update_table(cities, segment):
+     Input('selection-segment', 'value'),
+     Input('selection-retailer', 'value')])
+def update_table(cities, segment, retailer):
 
-    
-    return func_df_data(cities, segment).to_dict('records')
+    print('inside update table', cities, segment, retailer)
+
+    return func_df_data(cities, segment, retailer).to_dict('records')
 
 if __name__ == '__main__':
-    app.run_server(debug=True)
+    app.run_server(debug=False)
 
