@@ -103,7 +103,7 @@ def func_df_data(cities, segment):
                 location_address,
                 location_city
             &$where=
-                obligation_end_date_yyyymmdd between '2020-02-01' and '2020-02-29'
+                obligation_end_date_yyyymmdd between '2020-01-01' and '2020-12-31'
             &$order={segment_dict[segment]} DESC
             &$limit=100
         """
@@ -167,9 +167,17 @@ server = app.server # the Flask app
 
 app.layout = html.Div([
     html.H1('Mixed Beverage Gross Receipts'),
-    html.P('Dataset API can be found at data.texas.gov'),
+    html.P([
+        "This dashboard uses the ",
+        html.Em("Texas Comptroller of Public Accounts' "),
+        html.A("Mixed Beverage Gross Receipts data", href = "https://data.texas.gov/Government-and-Taxes/Mixed-Beverage-Gross-Receipts/naix-2893", target="_blank"),
+        ".",
+    ]),
+    html.P([
+        "By default, the table shows the top 100 retailers, by total beverage gross receipts, for the state. Make selections below to modify the results.",
+    ]),
     html.Div([
-        html.Label('City Selection'),
+        html.Label(html.Strong('Select one or more cities:')),
         dcc.Dropdown(
             id='selection-cities',
             options=[{'label':city, 'value':city} for city in df_cities['City'].unique()],
@@ -178,14 +186,14 @@ app.layout = html.Div([
             # style={'display': 'inline-block'}
         ),
         html.Br(),
-        html.Label('Sort By Segment Selection'),
+        html.Label(html.Strong('Select a segment to sort gross receipts by:')),
         dcc.RadioItems(
             id='selection-segment',
             options=[
-                {'label':'TOTAL', 'value':'TOTAL'},
-                {'label':'BEER', 'value':'BEER'},
-                {'label':'WINE', 'value':'WINE'},
-                {'label':'LIQUOR', 'value':'LIQUOR'}],
+                {'label':'Total', 'value':'TOTAL'},
+                {'label':'Beer', 'value':'BEER'},
+                {'label':'Wine', 'value':'WINE'},
+                {'label':'Liquor', 'value':'LIQUOR'}],
             value='TOTAL',
             # labelStyle={'display': 'inline-block'}
         )
@@ -194,16 +202,16 @@ app.layout = html.Div([
     dash_table.DataTable(
     id='table',
     columns=[
-        {'id': 'LocName', 'name': 'LocName', 'type': 'text'},
+        {'id': 'LocName', 'name': 'Retailer Name', 'type': 'text'},
         {'id': 'Address', 'name': 'Address', 'type': 'text'},
         {'id': 'City', 'name': 'City', 'type': 'text'},
         {'id': 'LicNbr', 'name': 'LicNbr', 'type': 'text'},
         {'id': 'BegDate', 'name': 'BegDate', 'type': 'datetime'},
         {'id': 'EndDate', 'name': 'EndDate', 'type': 'datetime'},
-        {'id': 'TotalSum', 'name': 'TotalSum', 'type': 'numeric', 'format': FormatTemplate.money(0)},
-        {'id': 'BeerSum', 'name': 'BeerSum', 'type': 'numeric', 'format': FormatTemplate.money(0)},
-        {'id': 'WineSum', 'name': 'WineSum', 'type': 'numeric', 'format': FormatTemplate.money(0)},
-        {'id': 'LiqSum', 'name': 'LiqSum', 'type': 'numeric', 'format': FormatTemplate.money(0)}
+        {'id': 'TotalSum', 'name': 'Total', 'type': 'numeric', 'format': FormatTemplate.money(0)},
+        {'id': 'BeerSum', 'name': 'Beer', 'type': 'numeric', 'format': FormatTemplate.money(0)},
+        {'id': 'WineSum', 'name': 'Wine', 'type': 'numeric', 'format': FormatTemplate.money(0)},
+        {'id': 'LiqSum', 'name': 'Liquor', 'type': 'numeric', 'format': FormatTemplate.money(0)}
  ],
     fixed_rows={'headers': False},
     style_table={'height': 400},
