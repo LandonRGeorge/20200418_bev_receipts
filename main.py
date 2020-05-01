@@ -1,4 +1,5 @@
-import json
+
+#%%import json
 import os
 import re
 import datetime
@@ -13,6 +14,8 @@ import dash_core_components as dcc
 import dash_html_components as html
 import dash_table
 from dash.dependencies import Input, Output
+from dash_table.Format import Format, Scheme, Sign, Symbol
+import dash_table.FormatTemplate as FormatTemplate
 
 # Pandas display options
 pd.set_option('display.max_columns', None)
@@ -121,10 +124,9 @@ def func_df_data(cities, segment):
 
     cols = ({
     'location_name': {'rename': 'LocName', 'dtype': 'object'},
-    'tabc_permit_number': {'rename': 'LicNbr', 'dtype': 'object'},
-    'location_number': {'rename': 'LocNbr', 'dtype': 'object'},
     'location_address': {'rename': 'Address', 'dtype': 'object'},
     'location_city': {'rename': 'City', 'dtype': 'object'},
+    'tabc_permit_number': {'rename': 'LicNbr', 'dtype': 'object'},
     'min_obligation_beg_date_yyyymmdd': {'rename': 'BegDate','dtype': 'datetime64'},
     'max_obligation_end_date_yyyymmdd': {'rename': 'EndDate','dtype': 'datetime64'},
     'sum_total_receipts': {'rename': 'TotalSum', 'dtype': 'float64'},
@@ -143,11 +145,21 @@ def func_df_data(cities, segment):
         except:
             pass
 
-    df = df.rename(columns={col:cols[col]['rename'] for col in cols})
+    cols_keep = [cols[col]['rename'] for col in cols]
+    df = df.rename(columns={col:cols[col]['rename'] for col in cols}).loc[:,cols_keep]
+    
+    # doing this to get rid of timezone formatting in dash datatable
+    # df = df.assign(
+    #     BegDate = pd.DatetimeIndex(df['BegDate']).strftime("%Y-%m-%d"),
+    #     EndDate = pd.DatetimeIndex(df['EndDate']).strftime("%Y-%m-%d")
+    # )
 
     return df
 
 df_data = func_df_data(cities=[], segment='TOTAL')
+#%%
+
+#%%
 
 
 app = dash.Dash(__name__)
@@ -156,27 +168,63 @@ server = app.server # the Flask app
 app.layout = html.Div([
     html.H1('Mixed Beverage Gross Receipts'),
     html.P('Dataset API can be found at data.texas.gov'),
-    html.Label('City Selection'),
-    dcc.Dropdown(
-        id='selection-cities',
-        options=[{'label':city, 'value':city} for city in df_cities['City'].unique()],
-        value=[],
-        multi=True
-    ),
-    html.Label('Sort By Segment Selection'),
-    dcc.RadioItems(
-        id='selection-segment',
-        options=[
-            {'label':'TOTAL', 'value':'TOTAL'},
-            {'label':'BEER', 'value':'BEER'},
-            {'label':'WINE', 'value':'WINE'},
-            {'label':'LIQUOR', 'value':'LIQUOR'}],
-        value='TOTAL',
-        labelStyle={'display': 'inline-block'}
-    ),
+    html.Div([
+        html.Label('City Selection'),
+        dcc.Dropdown(
+            id='selection-cities',
+            options=[{'label':city, 'value':city} for city in df_cities['City'].unique()],
+            value=[],
+            multi=True,
+            # style={'display': 'inline-block'}
+        ),
+        html.Br(),
+        html.Label('Sort By Segment Selection'),
+        dcc.RadioItems(
+            id='selection-segment',
+            options=[
+                {'label':'TOTAL', 'value':'TOTAL'},
+                {'label':'BEER', 'value':'BEER'},
+                {'label':'WINE', 'value':'WINE'},
+                {'label':'LIQUOR', 'value':'LIQUOR'}],
+            value='TOTAL',
+            # labelStyle={'display': 'inline-block'}
+        )
+    ]),
+    html.Br(),
     dash_table.DataTable(
     id='table',
-    columns=[{"name": i, "id": i} for i in df_data.columns]
+    columns=[
+        {'id': 'LocName', 'name': 'LocName', 'type': 'text'},
+        {'id': 'Address', 'name': 'Address', 'type': 'text'},
+        {'id': 'City', 'name': 'City', 'type': 'text'},
+        {'id': 'LicNbr', 'name': 'LicNbr', 'type': 'text'},
+        {'id': 'BegDate', 'name': 'BegDate', 'type': 'datetime'},
+        {'id': 'EndDate', 'name': 'EndDate', 'type': 'datetime'},
+        {'id': 'TotalSum', 'name': 'TotalSum', 'type': 'numeric', 'format': FormatTemplate.money(0)},
+        {'id': 'BeerSum', 'name': 'BeerSum', 'type': 'numeric', 'format': FormatTemplate.money(0)},
+        {'id': 'WineSum', 'name': 'WineSum', 'type': 'numeric', 'format': FormatTemplate.money(0)},
+        {'id': 'LiqSum', 'name': 'LiqSum', 'type': 'numeric', 'format': FormatTemplate.money(0)}
+ ],
+    fixed_rows={'headers': False},
+    style_table={'height': 400},
+    style_cell={'textAlign': 'left'},
+    style_cell_conditional=[
+        {
+            'if': {'column_id': c},
+            'textAlign': 'right'
+        } for c in ['TotalSum', 'BeerSum','WineSum','LiqSum']
+    ],
+    style_data_conditional=[
+        {
+            'if': {'row_index': 'odd'},
+            'backgroundColor': 'rgb(248, 248, 248)'
+        }
+    ],
+    style_header={
+        'backgroundColor': 'rgb(230, 230, 230)',
+        'fontWeight': 'bold'
+    },
+    # style_as_list_view=True, # removes vertical table dividers
 )
 ])
 
