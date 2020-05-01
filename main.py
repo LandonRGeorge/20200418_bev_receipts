@@ -81,7 +81,7 @@ def func_df_data(cities, segment, retailer):
             &$where=
                 obligation_end_date_yyyymmdd between '2020-02-01' and '2020-02-29'
                 and location_city in({text_cities})
-                and location_name like '%25{retailer}%25'
+                and location_name like '%25{retailer.upper()}%25'
             &$order={segment_dict[segment]} DESC
             &$limit=100
         """
@@ -141,7 +141,7 @@ def func_df_data(cities, segment, retailer):
                 location_city
             &$where=
                 obligation_end_date_yyyymmdd between '2020-01-01' and '2020-12-31'
-                and location_name like '%25{retailer}%25'
+                and location_name like '%25{retailer.upper()}%25'
             &$order={segment_dict[segment]} DESC
             &$limit=100
         """
