@@ -24,6 +24,8 @@ pd.set_option('display.max_rows', 100)
 url_base = "https://data.texas.gov/resource/naix-2893.json?"
 
 def df_cities():
+    """Grab distinct listing of cities"""
+
     url_args = f"""
         $select=distinct location_city&$limit=10000
     """
@@ -35,7 +37,22 @@ def df_cities():
     return pd.read_json(url_full).rename(columns={'location_city':'City'})
 
 df_cities = df_cities()
+#%%
+def df_dates():
+    url_args = f"""
+        $select= max(obligation_end_date_yyyymmdd)
+    """
 
+    url_args = re.sub(r'\n\s*', '', url_args).replace(' ', '%20')
+
+    url_full = url_base + url_args
+
+    return pd.read_json(url_full, dtype='datetime64').assign(
+        min_obligation_end_date_yyyymmdd = lambda x: x['max_obligation_end_date_yyyymmdd'] - pd.offsets.MonthOffset(12)
+    )
+
+df_dates = df_dates()
+#%%
 def func_df_data(cities, segment, retailer):
     """Grab data from TX Comptroller API"""
 
@@ -224,99 +241,155 @@ def func_df_data(cities, segment, retailer):
 
     return df
 
-df_data = func_df_data(cities=[], segment='TOTAL', retailer=None)
+df_data = func_df_data(cities=[], segment='TOTAL', retailer=None).head(50)
 
 #%%
 
+import plotly.offline as pyo
+import plotly.graph_objs as go
+import plotly as py
 
-app = dash.Dash(__name__)
-server = app.server # the Flask app
+fig = go.Figure()
 
-app.layout = html.Div([
-    html.H1('Mixed Beverage Gross Receipts'),
-    html.P([
-        "This dashboard uses the ",
-        html.Em("Texas Comptroller of Public Accounts' "),
-        html.A("Mixed Beverage Gross Receipts data", href = "https://data.texas.gov/Government-and-Taxes/Mixed-Beverage-Gross-Receipts/naix-2893", target="_blank"),
-        ".",
-    ]),
-    html.P([
-        "By default, the table shows the top 100 retailers, by total beverage gross receipts, for the state. Make selections below to modify the results.",
-    ]),
-    html.Div([
-        html.Label(html.Strong('Select one or more cities:')),
-        dcc.Dropdown(
-            id='selection-cities',
-            options=[{'label':city, 'value':city} for city in df_cities['City'].unique()],
-            value=[],
-            multi=True,
-            # style={'display': 'inline-block'}
-        ),
-        html.Br(),
-        html.Label(html.Strong('Select a segment to sort gross receipts by:')),
-        dcc.RadioItems(
-            id='selection-segment',
-            options=[
-                {'label':'Total', 'value':'TOTAL'},
-                {'label':'Beer', 'value':'BEER'},
-                {'label':'Wine', 'value':'WINE'},
-                {'label':'Liquor', 'value':'LIQUOR'}],
-            value='TOTAL',
-            # labelStyle={'display': 'inline-block'}
-        ),
-        html.Br(),
-        html.Label(html.Strong('If desired, search for a retailer by name (must hit `enter`):')),
-        dcc.Input(id="selection-retailer", type="text", placeholder="", debounce=True),
-    ]),
-    html.Br(),
-    dash_table.DataTable(
-    id='table',
-    columns=[
-        {'id': 'LocName', 'name': 'Retailer Name', 'type': 'text'},
-        {'id': 'Address', 'name': 'Address', 'type': 'text'},
-        {'id': 'City', 'name': 'City', 'type': 'text'},
-        {'id': 'LicNbr', 'name': 'LicNbr', 'type': 'text'},
-        {'id': 'BegDate', 'name': 'BegDate', 'type': 'datetime'},
-        {'id': 'EndDate', 'name': 'EndDate', 'type': 'datetime'},
-        {'id': 'TotalSum', 'name': 'Total', 'type': 'numeric', 'format': FormatTemplate.money(0)},
-        {'id': 'BeerSum', 'name': 'Beer', 'type': 'numeric', 'format': FormatTemplate.money(0)},
-        {'id': 'WineSum', 'name': 'Wine', 'type': 'numeric', 'format': FormatTemplate.money(0)},
-        {'id': 'LiqSum', 'name': 'Liquor', 'type': 'numeric', 'format': FormatTemplate.money(0)}
- ],
-    fixed_rows={'headers': False},
-    style_table={'height': 400},
-    style_cell={'textAlign': 'left'},
-    style_cell_conditional=[
-        {
-            'if': {'column_id': c},
-            'textAlign': 'right'
-        } for c in ['TotalSum', 'BeerSum','WineSum','LiqSum']
-    ],
-    style_data_conditional=[
-        {
-            'if': {'row_index': 'odd'},
-            'backgroundColor': 'rgb(248, 248, 248)'
-        }
-    ],
-    style_header={
-        'backgroundColor': 'rgb(230, 230, 230)',
-        'fontWeight': 'bold'
-    },
-    # style_as_list_view=True, # removes vertical table dividers
+
+fig.add_trace(
+    go.Bar(
+        x=df_data.index+1,
+        y=df_data["BeerSum"],
+        name="BeerSum",
+        text=df_data['LocName']
+        )
 )
-])
 
-@app.callback(
-    Output('table', 'data'),
-    [Input('selection-cities', 'value'),
-     Input('selection-segment', 'value'),
-     Input('selection-retailer', 'value')])
-def update_table(cities, segment, retailer):
 
-    print('inside update table', cities, segment, retailer)
+fig.add_trace(
+    go.Bar(
+        x=df_data.index+1,
+        y=df_data["LiqSum"],
+        name="LiqSum",
+        text=df_data['LocName']
+        )
+)
 
-    return func_df_data(cities, segment, retailer).to_dict('records')
+fig.add_trace(
+    go.Bar(
+        x=df_data.index+1,
+        y=df_data["WineSum"],
+        name="WineSum",
+        text=df_data['LocName']
+        )
+)
 
-if __name__ == '__main__':
-    app.run_server(debug=False)
+fig.update_layout(
+    go.Layout(
+        title=dict(
+            text='Total Receipts', y=0.9, x=0.5, xanchor="center", yanchor="top",
+        ),
+        barmode='stack',
+        hovermode="closest",
+        titlefont=dict(size=24, color="black"),
+        xaxis={'categoryorder':'category ascending'},
+        yaxis=dict(title="Total Receipts"),
+        yaxis_tickprefix="$",
+        yaxis_tickformat=",.",
+        template="plotly_white",  # can try plotly, plotly_white, ggplot, ggplot
+    )
+)
 
+fig.show()
+
+# #%%
+# app = dash.Dash(__name__)
+# server = app.server # the Flask app
+
+# app.layout = html.Div([
+#     html.H1('Mixed Beverage Gross Receipts'),
+#     html.P([
+#         "This dashboard uses the ",
+#         html.Em("Texas Comptroller of Public Accounts' "),
+#         html.A("Mixed Beverage Gross Receipts data", href = "https://data.texas.gov/Government-and-Taxes/Mixed-Beverage-Gross-Receipts/naix-2893", target="_blank"),
+#         ".",
+#     ]),
+#     html.P([
+#         "By default, the table shows the top 100 retailers, by total beverage gross receipts, for the state. Make selections below to modify the results.",
+#     ]),
+#     html.Div([
+#         html.Label(html.Strong('Select one or more cities:')),
+#         dcc.Dropdown(
+#             id='selection-cities',
+#             options=[{'label':city, 'value':city} for city in df_cities['City'].unique()],
+#             value=[],
+#             multi=True,
+#             # style={'display': 'inline-block'}
+#         ),
+#         html.Br(),
+#         html.Label(html.Strong('Select a segment to sort gross receipts by:')),
+#         dcc.RadioItems(
+#             id='selection-segment',
+#             options=[
+#                 {'label':'Total', 'value':'TOTAL'},
+#                 {'label':'Beer', 'value':'BEER'},
+#                 {'label':'Wine', 'value':'WINE'},
+#                 {'label':'Liquor', 'value':'LIQUOR'}],
+#             value='TOTAL',
+#             # labelStyle={'display': 'inline-block'}
+#         ),
+#         html.Br(),
+#         html.Label(html.Strong('If desired, search for a retailer by name (must hit `enter`):')),
+#         dcc.Input(id="selection-retailer", type="text", placeholder="", debounce=True),
+#     ]),
+#     html.Br(),
+#     dash_table.DataTable(
+#     id='table',
+#     columns=[
+#         {'id': 'LocName', 'name': 'Retailer Name', 'type': 'text'},
+#         {'id': 'Address', 'name': 'Address', 'type': 'text'},
+#         {'id': 'City', 'name': 'City', 'type': 'text'},
+#         {'id': 'LicNbr', 'name': 'LicNbr', 'type': 'text'},
+#         {'id': 'BegDate', 'name': 'BegDate', 'type': 'datetime'},
+#         {'id': 'EndDate', 'name': 'EndDate', 'type': 'datetime'},
+#         {'id': 'TotalSum', 'name': 'Total', 'type': 'numeric', 'format': FormatTemplate.money(0)},
+#         {'id': 'BeerSum', 'name': 'Beer', 'type': 'numeric', 'format': FormatTemplate.money(0)},
+#         {'id': 'WineSum', 'name': 'Wine', 'type': 'numeric', 'format': FormatTemplate.money(0)},
+#         {'id': 'LiqSum', 'name': 'Liquor', 'type': 'numeric', 'format': FormatTemplate.money(0)}
+#  ],
+#     fixed_rows={'headers': False},
+#     style_table={'height': 400},
+#     style_cell={'textAlign': 'left'},
+#     style_cell_conditional=[
+#         {
+#             'if': {'column_id': c},
+#             'textAlign': 'right'
+#         } for c in ['TotalSum', 'BeerSum','WineSum','LiqSum']
+#     ],
+#     style_data_conditional=[
+#         {
+#             'if': {'row_index': 'odd'},
+#             'backgroundColor': 'rgb(248, 248, 248)'
+#         }
+#     ],
+#     style_header={
+#         'backgroundColor': 'rgb(230, 230, 230)',
+#         'fontWeight': 'bold'
+#     },
+#     # style_as_list_view=True, # removes vertical table dividers
+# )
+# ])
+
+# @app.callback(
+#     Output('table', 'data'),
+#     [Input('selection-cities', 'value'),
+#      Input('selection-segment', 'value'),
+#      Input('selection-retailer', 'value')])
+# def update_table(cities, segment, retailer):
+
+#     print('inside update table', cities, segment, retailer)
+
+#     return func_df_data(cities, segment, retailer).to_dict('records')
+
+# if __name__ == '__main__':
+#     app.run_server(debug=False)
+
+
+
+# %%
