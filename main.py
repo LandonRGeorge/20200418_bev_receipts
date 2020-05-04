@@ -7,6 +7,8 @@ import time
 
 import requests
 import pandas as pd
+from pandas.tseries.offsets import DateOffset, MonthEnd, MonthBegin
+
 import numpy as np
 
 import dash
@@ -23,6 +25,30 @@ pd.set_option('display.max_rows', 100)
 
 url_base = "https://data.texas.gov/resource/naix-2893.json?"
 
+#%%
+def get_date_range():
+    """Get date range to feed into API query"""
+
+    today = pd.Timestamp.today()
+    
+    # default end date to last day of previous month (from today)
+    end_date = today - DateOffset(months=1) + MonthEnd()
+
+    # default start date to first day of month 12 months ago
+    start_date = end_date - DateOffset(months=11) - MonthBegin()
+
+    def format_date(date):
+        """Return date in `YYYY-mm-dd` format."""
+
+        return date.to_pydatetime().strftime('%Y-%m-%d')
+
+    return format_date(start_date), format_date(end_date)
+
+
+start_date, end_date = get_date_range()
+
+#%%
+
 def df_cities():
     """Grab distinct listing of cities"""
 
@@ -37,26 +63,12 @@ def df_cities():
     return pd.read_json(url_full).rename(columns={'location_city':'City'})
 
 df_cities = df_cities()
+
 #%%
-def df_dates():
-    url_args = f"""
-        $select= max(obligation_end_date_yyyymmdd)
-    """
-
-    url_args = re.sub(r'\n\s*', '', url_args).replace(' ', '%20')
-
-    url_full = url_base + url_args
-
-    return pd.read_json(url_full, dtype='datetime64').assign(
-        min_obligation_end_date_yyyymmdd = lambda x: x['max_obligation_end_date_yyyymmdd'] - pd.offsets.MonthOffset(12)
-    )
-
-df_dates = df_dates()
-#%%
-def func_df_data(cities, segment, retailer):
+def func_df_data(cities, segment, retailer, start_date, end_date):
     """Grab data from TX Comptroller API"""
 
-    print('inside func_df_data',cities, segment, retailer)
+    print(cities, segment, retailer, start_date, end_date)
 
     segment_dict = ({
         'TOTAL':'sum_total_receipts',
@@ -65,7 +77,6 @@ def func_df_data(cities, segment, retailer):
         'LIQUOR':'sum_liquor_receipts'
     })
 
-
     text_cities = ''
     for i, city in enumerate(cities):
         text_temp = f"'{city}'"
@@ -73,126 +84,59 @@ def func_df_data(cities, segment, retailer):
             text_temp+=','
         text_cities+=text_temp
 
-    if cities and retailer:
-        print('cities = True')
+    url_args_select_group = f"""
+        $select=
+            location_name,
+            tabc_permit_number,
+            location_number,
+            location_address,
+            location_city,
+            min(obligation_end_date_yyyymmdd),
+            max(obligation_end_date_yyyymmdd),
+            sum(total_receipts),
+            sum(beer_receipts),
+            sum(wine_receipts),
+            sum(liquor_receipts)
+        &$group=
+            location_name,
+            tabc_permit_number,
+            location_number,
+            location_address,
+            location_city
+    """
 
-        url_args = f"""
-            $select=
-                location_name,
-                tabc_permit_number,
-                location_number,
-                location_address,
-                location_city,
-                min(obligation_end_date_yyyymmdd),
-                max(obligation_end_date_yyyymmdd),
-                sum(total_receipts),
-                sum(beer_receipts),
-                sum(wine_receipts),
-                sum(liquor_receipts)
-            &$group=
-                location_name,
-                tabc_permit_number,
-                location_number,
-                location_address,
-                location_city
+    if cities and retailer:
+
+        url_args_where = f"""
             &$where=
-                obligation_end_date_yyyymmdd between '2020-02-01' and '2020-02-29'
+                obligation_end_date_yyyymmdd between '{start_date}' and '{end_date}'
                 and location_city in({text_cities})
                 and location_name like '%25{retailer}%25'
-            &$order={segment_dict[segment]} DESC
-            &$limit=100
         """
 
     elif cities:
-        print('cities = True')
 
-        url_args = f"""
-            $select=
-                location_name,
-                tabc_permit_number,
-                location_number,
-                location_address,
-                location_city,
-                min(obligation_end_date_yyyymmdd),
-                max(obligation_end_date_yyyymmdd),
-                sum(total_receipts),
-                sum(beer_receipts),
-                sum(wine_receipts),
-                sum(liquor_receipts)
-            &$group=
-                location_name,
-                tabc_permit_number,
-                location_number,
-                location_address,
-                location_city
+        url_args_where = f"""
             &$where=
-                obligation_end_date_yyyymmdd between '2020-02-01' and '2020-02-29'
+                obligation_end_date_yyyymmdd between '{start_date}' and '{end_date}'
                 and location_city in({text_cities})
-            &$order={segment_dict[segment]} DESC
-            &$limit=100
         """
 
 
     elif retailer:
 
-        print('retailer = True')
-
-        url_args = f"""
-            $select=
-                location_name,
-                tabc_permit_number,
-                location_number,
-                location_address,
-                location_city,
-                min(obligation_end_date_yyyymmdd),
-                max(obligation_end_date_yyyymmdd),
-                sum(total_receipts),
-                sum(beer_receipts),
-                sum(wine_receipts),
-                sum(liquor_receipts)
-            &$group=
-                location_name,
-                tabc_permit_number,
-                location_number,
-                location_address,
-                location_city
+        url_args_where = f"""
             &$where=
-                obligation_end_date_yyyymmdd between '2020-01-01' and '2020-12-31'
-                and location_name like '%25{retailer}%25'
-            &$order={segment_dict[segment]} DESC
-            &$limit=100
+                obligation_end_date_yyyymmdd between '{start_date}' and '{end_date}'
         """
 
     else:
 
-        print('city and retailer = False')
-
-        url_args = f"""
-            $select=
-                location_name,
-                tabc_permit_number,
-                location_number,
-                location_address,
-                location_city,
-                min(obligation_end_date_yyyymmdd),
-                max(obligation_end_date_yyyymmdd),
-                sum(total_receipts),
-                sum(beer_receipts),
-                sum(wine_receipts),
-                sum(liquor_receipts)
-            &$group=
-                location_name,
-                tabc_permit_number,
-                location_number,
-                location_address,
-                location_city
-            &$where=
-                obligation_end_date_yyyymmdd between '2020-01-01' and '2020-12-31'
-            &$order={segment_dict[segment]} DESC
-            &$limit=100
+        url_args_where = f"""
+            &$where=obligation_end_date_yyyymmdd between '{start_date}' and '{end_date}'
         """
 
-
+    url_args = url_args_select_group + url_args_where + f'&$order={segment_dict[segment]} DESC' + '&$limit=100'
     url_args = re.sub(r'\n\s*', '', url_args).replace(' ', '%20')
 
     url_full = url_base + url_args
@@ -241,155 +185,168 @@ def func_df_data(cities, segment, retailer):
 
     return df
 
-df_data = func_df_data(cities=[], segment='TOTAL', retailer=None).head(50)
-
-#%%
-
-import plotly.offline as pyo
-import plotly.graph_objs as go
-import plotly as py
-
-fig = go.Figure()
-
-
-fig.add_trace(
-    go.Bar(
-        x=df_data.index+1,
-        y=df_data["BeerSum"],
-        name="BeerSum",
-        text=df_data['LocName']
-        )
-)
-
-
-fig.add_trace(
-    go.Bar(
-        x=df_data.index+1,
-        y=df_data["LiqSum"],
-        name="LiqSum",
-        text=df_data['LocName']
-        )
-)
-
-fig.add_trace(
-    go.Bar(
-        x=df_data.index+1,
-        y=df_data["WineSum"],
-        name="WineSum",
-        text=df_data['LocName']
-        )
-)
-
-fig.update_layout(
-    go.Layout(
-        title=dict(
-            text='Total Receipts', y=0.9, x=0.5, xanchor="center", yanchor="top",
-        ),
-        barmode='stack',
-        hovermode="closest",
-        titlefont=dict(size=24, color="black"),
-        xaxis={'categoryorder':'category ascending'},
-        yaxis=dict(title="Total Receipts"),
-        yaxis_tickprefix="$",
-        yaxis_tickformat=",.",
-        template="plotly_white",  # can try plotly, plotly_white, ggplot, ggplot
-    )
-)
-
-fig.show()
+df_data = func_df_data(cities=[], segment='TOTAL', retailer=None, start_date=start_date, end_date=end_date)
 
 # #%%
-# app = dash.Dash(__name__)
-# server = app.server # the Flask app
 
-# app.layout = html.Div([
-#     html.H1('Mixed Beverage Gross Receipts'),
-#     html.P([
-#         "This dashboard uses the ",
-#         html.Em("Texas Comptroller of Public Accounts' "),
-#         html.A("Mixed Beverage Gross Receipts data", href = "https://data.texas.gov/Government-and-Taxes/Mixed-Beverage-Gross-Receipts/naix-2893", target="_blank"),
-#         ".",
-#     ]),
-#     html.P([
-#         "By default, the table shows the top 100 retailers, by total beverage gross receipts, for the state. Make selections below to modify the results.",
-#     ]),
-#     html.Div([
-#         html.Label(html.Strong('Select one or more cities:')),
-#         dcc.Dropdown(
-#             id='selection-cities',
-#             options=[{'label':city, 'value':city} for city in df_cities['City'].unique()],
-#             value=[],
-#             multi=True,
-#             # style={'display': 'inline-block'}
-#         ),
-#         html.Br(),
-#         html.Label(html.Strong('Select a segment to sort gross receipts by:')),
-#         dcc.RadioItems(
-#             id='selection-segment',
-#             options=[
-#                 {'label':'Total', 'value':'TOTAL'},
-#                 {'label':'Beer', 'value':'BEER'},
-#                 {'label':'Wine', 'value':'WINE'},
-#                 {'label':'Liquor', 'value':'LIQUOR'}],
-#             value='TOTAL',
-#             # labelStyle={'display': 'inline-block'}
-#         ),
-#         html.Br(),
-#         html.Label(html.Strong('If desired, search for a retailer by name (must hit `enter`):')),
-#         dcc.Input(id="selection-retailer", type="text", placeholder="", debounce=True),
-#     ]),
-#     html.Br(),
-#     dash_table.DataTable(
-#     id='table',
-#     columns=[
-#         {'id': 'LocName', 'name': 'Retailer Name', 'type': 'text'},
-#         {'id': 'Address', 'name': 'Address', 'type': 'text'},
-#         {'id': 'City', 'name': 'City', 'type': 'text'},
-#         {'id': 'LicNbr', 'name': 'LicNbr', 'type': 'text'},
-#         {'id': 'BegDate', 'name': 'BegDate', 'type': 'datetime'},
-#         {'id': 'EndDate', 'name': 'EndDate', 'type': 'datetime'},
-#         {'id': 'TotalSum', 'name': 'Total', 'type': 'numeric', 'format': FormatTemplate.money(0)},
-#         {'id': 'BeerSum', 'name': 'Beer', 'type': 'numeric', 'format': FormatTemplate.money(0)},
-#         {'id': 'WineSum', 'name': 'Wine', 'type': 'numeric', 'format': FormatTemplate.money(0)},
-#         {'id': 'LiqSum', 'name': 'Liquor', 'type': 'numeric', 'format': FormatTemplate.money(0)}
-#  ],
-#     fixed_rows={'headers': False},
-#     style_table={'height': 400},
-#     style_cell={'textAlign': 'left'},
-#     style_cell_conditional=[
-#         {
-#             'if': {'column_id': c},
-#             'textAlign': 'right'
-#         } for c in ['TotalSum', 'BeerSum','WineSum','LiqSum']
-#     ],
-#     style_data_conditional=[
-#         {
-#             'if': {'row_index': 'odd'},
-#             'backgroundColor': 'rgb(248, 248, 248)'
-#         }
-#     ],
-#     style_header={
-#         'backgroundColor': 'rgb(230, 230, 230)',
-#         'fontWeight': 'bold'
-#     },
-#     # style_as_list_view=True, # removes vertical table dividers
+# import plotly.offline as pyo
+# import plotly.graph_objs as go
+# import plotly as py
+
+# fig = go.Figure()
+
+
+# fig.add_trace(
+#     go.Bar(
+#         x=df_data.index+1,
+#         y=df_data["BeerSum"],
+#         name="BeerSum",
+#         text=df_data['LocName']
+#         )
 # )
-# ])
-
-# @app.callback(
-#     Output('table', 'data'),
-#     [Input('selection-cities', 'value'),
-#      Input('selection-segment', 'value'),
-#      Input('selection-retailer', 'value')])
-# def update_table(cities, segment, retailer):
-
-#     print('inside update table', cities, segment, retailer)
-
-#     return func_df_data(cities, segment, retailer).to_dict('records')
-
-# if __name__ == '__main__':
-#     app.run_server(debug=False)
 
 
+# fig.add_trace(
+#     go.Bar(
+#         x=df_data.index+1,
+#         y=df_data["LiqSum"],
+#         name="LiqSum",
+#         text=df_data['LocName']
+#         )
+# )
 
-# %%
+# fig.add_trace(
+#     go.Bar(
+#         x=df_data.index+1,
+#         y=df_data["WineSum"],
+#         name="WineSum",
+#         text=df_data['LocName']
+#         )
+# )
+
+# fig.update_layout(
+#     go.Layout(
+#         title=dict(
+#             text='Total Receipts', y=0.9, x=0.5, xanchor="center", yanchor="top",
+#         ),
+#         barmode='stack',
+#         hovermode="closest",
+#         titlefont=dict(size=24, color="black"),
+#         xaxis={'categoryorder':'category ascending'},
+#         yaxis=dict(title="Total Receipts"),
+#         yaxis_tickprefix="$",
+#         yaxis_tickformat=",.",
+#         template="plotly_white",  # can try plotly, plotly_white, ggplot, ggplot
+#     )
+# )
+
+# fig.show()
+
+#%%
+app = dash.Dash(__name__)
+server = app.server # the Flask app
+
+app.layout = html.Div([
+    html.H1('Mixed Beverage Gross Receipts'),
+    html.P([
+        "This dashboard uses the ",
+        html.Em("Texas Comptroller of Public Accounts' "),
+        html.A("Mixed Beverage Gross Receipts data", href = "https://data.texas.gov/Government-and-Taxes/Mixed-Beverage-Gross-Receipts/naix-2893", target="_blank"),
+        ".",
+    ]),
+    html.P([
+        "By default, the table shows the top 100 retailers, by total beverage gross receipts, for the state. Make selections below to modify the results.",
+    ]),
+    html.Div([
+        html.Label(html.Strong('Select one or more cities:')),
+        dcc.Dropdown(
+            id='selection-cities',
+            options=[{'label':city, 'value':city} for city in df_cities['City'].unique()],
+            value=[],
+            multi=True,
+            # style={'display': 'inline-block'}
+        ),
+        html.Br(),
+        html.Label(html.Strong('Select a segment to sort gross receipts by:')),
+        dcc.RadioItems(
+            id='selection-segment',
+            options=[
+                {'label':'Total', 'value':'TOTAL'},
+                {'label':'Beer', 'value':'BEER'},
+                {'label':'Wine', 'value':'WINE'},
+                {'label':'Liquor', 'value':'LIQUOR'}],
+            value='TOTAL',
+            # labelStyle={'display': 'inline-block'}
+        ),
+        html.Br(),
+        html.Label(html.Strong('Search for a retailer by name (must hit `enter`):')),
+        html.Br(),
+        dcc.Input(id="selection-retailer", type="text", placeholder="", debounce=True),
+        html.Br(),
+        html.Br(),
+        html.Label(html.Strong('Pick a date range:')),
+        html.Br(),
+        dcc.DatePickerRange(
+            id='selection-date',
+            start_date=start_date,
+            end_date=end_date,
+            start_date_placeholder_text="Start Period",
+            end_date_placeholder_text="End Period",
+            calendar_orientation='horizontal',
+        )
+    ]),
+    html.Br(),
+    dash_table.DataTable(
+    id='table',
+    columns=[
+        {'id': 'LocName', 'name': 'Retailer Name', 'type': 'text'},
+        {'id': 'Address', 'name': 'Address', 'type': 'text'},
+        {'id': 'City', 'name': 'City', 'type': 'text'},
+        {'id': 'LicNbr', 'name': 'LicNbr', 'type': 'text'},
+        {'id': 'BegDate', 'name': 'BegDate', 'type': 'datetime'},
+        {'id': 'EndDate', 'name': 'EndDate', 'type': 'datetime'},
+        {'id': 'TotalSum', 'name': 'Total', 'type': 'numeric', 'format': FormatTemplate.money(0)},
+        {'id': 'BeerSum', 'name': 'Beer', 'type': 'numeric', 'format': FormatTemplate.money(0)},
+        {'id': 'WineSum', 'name': 'Wine', 'type': 'numeric', 'format': FormatTemplate.money(0)},
+        {'id': 'LiqSum', 'name': 'Liquor', 'type': 'numeric', 'format': FormatTemplate.money(0)}
+ ],
+    fixed_rows={'headers': False},
+    style_table={'height': 400},
+    style_cell={'textAlign': 'left'},
+    style_cell_conditional=[
+        {
+            'if': {'column_id': c},
+            'textAlign': 'right'
+        } for c in ['TotalSum', 'BeerSum','WineSum','LiqSum']
+    ],
+    style_data_conditional=[
+        {
+            'if': {'row_index': 'odd'},
+            'backgroundColor': 'rgb(248, 248, 248)'
+        }
+    ],
+    style_header={
+        'backgroundColor': 'rgb(230, 230, 230)',
+        'fontWeight': 'bold'
+    },
+    # style_as_list_view=True, # removes vertical table dividers
+)
+])
+
+print('abc')
+
+@app.callback(
+    Output('table', 'data'),
+    [Input('selection-cities', 'value'),
+     Input('selection-segment', 'value'),
+     Input('selection-retailer', 'value'),
+     Input('selection-date', 'start_date'),
+     Input('selection-date', 'end_date')])
+def update_table(cities, segment, retailer, start_date, end_date):
+
+    print('inside update table', cities, segment, retailer, start_date, end_date)
+
+    return func_df_data(cities, segment, retailer, start_date, end_date).to_dict('records')
+
+if __name__ == '__main__':
+    app.run_server(debug=False)
