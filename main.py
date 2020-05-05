@@ -19,7 +19,7 @@ from dash.dependencies import Input, Output
 from dash_table.Format import Format, Scheme, Sign, Symbol
 import dash_table.FormatTemplate as FormatTemplate
 
-from helper import county_dict
+from helper import dict_county_map
 
 # Pandas display options
 pd.set_option('display.max_columns', None)
@@ -52,7 +52,7 @@ def get_date_range():
 start_date, end_date = get_date_range()
 
 #%%
-def func_df_counties():
+def func_df_counties_cities():
     """Grab distinct listing of counties and cities"""
 
     url_args = f"""
@@ -66,14 +66,31 @@ def func_df_counties():
     df = (
         pd.read_json(url_full)
         .rename(columns={'location_county':'CountyNbr', 'location_city':'City'})
-        .assign(CountyDesc = lambda x: x['CountyNbr'].map(county_dict))
+        .assign(CountyDesc = lambda x: x['CountyNbr'].map(dict_county_map))
         .sort_values(by=['CountyDesc','City'])
         )
 
     return df
 
-df_counties = func_df_counties()
-dict_df_counties = df_counties[['CountyNbr','CountyDesc']].drop_duplicates().set_index('CountyNbr').iloc[:,0].to_dict()
+df_counties_cities = func_df_counties_cities()
+dict_counties_df = df_counties_cities[['CountyNbr','CountyDesc']].drop_duplicates().set_index('CountyNbr').iloc[:,0].to_dict()
+
+#%%
+def func_cities_from_county_selection(df, counties):
+    """Return all possible cities that could be selected, based on what has been selected from counties"""
+
+    if counties:
+
+        cities = sorted(df[df['CountyNbr'].isin(counties)].loc[:,'City'].unique().tolist())
+
+    else:
+
+        cities = sorted(df['City'].unique().tolist())
+
+    return cities
+
+
+cities = func_cities_from_county_selection(df_counties_cities, counties=None)
 
 
 #%%
@@ -184,7 +201,7 @@ def func_df_data(counties, segment, retailer, start_date, end_date):
 
     df = df.rename(columns={col:cols[col]['rename'] for col in cols}).loc[:,cols_keep]
     df = df.assign(
-        CountyDesc = lambda x: x['CountyNbr'].map(county_dict),
+        CountyDesc = lambda x: x['CountyNbr'].map(dict_county_map),
         Rank = lambda x: x.index + 1,
         BegDateStr = lambda x: x['BegDate'].dt.strftime('%Y-%m'),
         EndDateStr = lambda x: x['EndDate'].dt.strftime('%Y-%m')
@@ -217,10 +234,16 @@ app.layout = html.Div([
         html.Label(html.Strong('Select one or more counties:')),
         dcc.Dropdown(
             id='selection-counties',
-            options=[{'label':CountyDesc, 'value':CountyNbr} for CountyNbr,CountyDesc in dict_df_counties.items()],
+            options=[{'label':CountyDesc, 'value':CountyNbr} for CountyNbr,CountyDesc in dict_counties_df.items()],
             value=[],
             multi=True,
             # style={'display': 'inline-block'}
+        ),
+        html.Br(),
+        html.Label(html.Strong('Select one or more cities:')),
+        dcc.Dropdown(
+            id='selection-cities',
+            multi=True,
         ),
         html.Br(),
         html.Label(html.Strong('Select a segment to sort gross receipts by:')),
@@ -305,5 +328,15 @@ def update_table(counties, segment, retailer, start_date, end_date):
 
     return func_df_data(counties, segment, retailer, start_date, end_date).to_dict('records')
 
+
+@app.callback(
+    Output('selection-cities', 'options'),
+    [Input('selection-counties', 'value')])
+def update_cities(counties):
+
+    cities = func_cities_from_county_selection(df_counties_cities, counties)
+
+    return [{'label':city, 'value':city} for city in cities]
+
 if __name__ == '__main__':
-    app.run_server(debug=False)
+    app.run_server(debug=True)

@@ -1,4 +1,4 @@
-county_dict = ({
+dict_county_map = ({
 1: 'ANDERSON',
 2: 'ANDREWS',
 3: 'ANGELINA',
