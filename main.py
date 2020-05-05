@@ -19,9 +19,13 @@ from dash.dependencies import Input, Output
 from dash_table.Format import Format, Scheme, Sign, Symbol
 import dash_table.FormatTemplate as FormatTemplate
 
+from helper import county_dict
+
 # Pandas display options
 pd.set_option('display.max_columns', None)
 pd.set_option('display.max_rows', 100)
+
+#%%
 
 url_base = "https://data.texas.gov/resource/naix-2893.json?"
 
@@ -48,24 +52,32 @@ def get_date_range():
 start_date, end_date = get_date_range()
 
 #%%
-
-def df_cities():
-    """Grab distinct listing of cities"""
+def func_df_counties():
+    """Grab distinct listing of counties and cities"""
 
     url_args = f"""
-        $select=distinct location_city&$limit=10000
+        $select=distinct location_county, location_city&$limit=10000
     """
 
     url_args = re.sub(r'\n\s*', '', url_args).replace(' ', '%20')
 
     url_full = url_base + url_args
 
-    return pd.read_json(url_full).rename(columns={'location_city':'City'})
+    df = (
+        pd.read_json(url_full)
+        .rename(columns={'location_county':'CountyNbr', 'location_city':'City'})
+        .assign(CountyDesc = lambda x: x['CountyNbr'].map(county_dict))
+        .sort_values(by=['CountyDesc','City'])
+        )
 
-df_cities = df_cities()
+    return df
+
+df_counties = func_df_counties()
+dict_df_counties = df_counties[['CountyNbr','CountyDesc']].drop_duplicates().set_index('CountyNbr').iloc[:,0].to_dict()
+
 
 #%%
-def func_df_data(cities, segment, retailer, start_date, end_date):
+def func_df_data(counties, segment, retailer, start_date, end_date):
     """Grab data from TX Comptroller API"""
 
     segment_dict = ({
@@ -75,12 +87,12 @@ def func_df_data(cities, segment, retailer, start_date, end_date):
         'LIQUOR':'sum_liquor_receipts'
     })
 
-    text_cities = ''
-    for i, city in enumerate(cities):
-        text_temp = f"'{city}'"
-        if i != len(cities) - 1:
+    text_counties = ''
+    for i, county in enumerate(counties):
+        text_temp = f"'{county}'"
+        if i != len(counties) - 1:
             text_temp+=','
-        text_cities+=text_temp
+        text_counties+=text_temp
 
     url_args_select_group_where = f"""
         $select=
@@ -89,6 +101,7 @@ def func_df_data(cities, segment, retailer, start_date, end_date):
             location_number,
             location_address,
             location_city,
+            location_county,
             min(obligation_end_date_yyyymmdd),
             max(obligation_end_date_yyyymmdd),
             sum(total_receipts),
@@ -100,20 +113,21 @@ def func_df_data(cities, segment, retailer, start_date, end_date):
             tabc_permit_number,
             location_number,
             location_address,
-            location_city
+            location_city,
+            location_county
         &$where=obligation_end_date_yyyymmdd between '{start_date}' and '{end_date}'
     """
 
-    if cities and retailer:
+    if counties and retailer:
 
         url_args_where_opt = f"""
-            and location_city in({text_cities})
+            and location_county in({text_counties})
             and location_name like '%25{retailer.upper()}%25'
         """
 
-    elif cities:
+    elif counties:
 
-        url_args_where_opt = f"and location_city in({text_cities})"
+        url_args_where_opt = f"and location_county in({text_counties})"
 
 
     elif retailer:
@@ -125,7 +139,9 @@ def func_df_data(cities, segment, retailer, start_date, end_date):
 
         url_args_where_opt = ""
 
-    url_args = url_args_select_group_where + url_args_where_opt + f'&$order={segment_dict[segment]} DESC' + '&$limit=100'
+    url_args_order_limit = f'&$order={segment_dict[segment]} DESC' + '&$limit=100'
+
+    url_args = url_args_select_group_where + url_args_where_opt + url_args_order_limit
     url_args = re.sub(r'\n\s*', '', url_args).replace(' ', '%20')
 
     url_full = url_base + url_args
@@ -136,17 +152,16 @@ def func_df_data(cities, segment, retailer, start_date, end_date):
         pd.read_json(
             url_full, 
             convert_dates=['min_obligation_end_date_yyyymmdd', 'max_obligation_end_date_yyyymmdd']
-        ).assign(
-            min_obligation_end_date_yyyymmdd = lambda x: x['min_obligation_end_date_yyyymmdd'] - pd.offsets.MonthBegin()
-        ).rename(columns={'min_obligation_end_date_yyyymmdd':'min_obligation_beg_date_yyyymmdd'})
+        )
     )
 
     cols = ({
     'location_name': {'rename': 'LocName', 'dtype': 'object'},
     'location_address': {'rename': 'Address', 'dtype': 'object'},
     'location_city': {'rename': 'City', 'dtype': 'object'},
+    'location_county': {'rename': 'CountyNbr', 'dtype': 'int64'},
     'tabc_permit_number': {'rename': 'LicNbr', 'dtype': 'object'},
-    'min_obligation_beg_date_yyyymmdd': {'rename': 'BegDate','dtype': 'datetime64'},
+    'min_obligation_end_date_yyyymmdd': {'rename': 'BegDate','dtype': 'datetime64'},
     'max_obligation_end_date_yyyymmdd': {'rename': 'EndDate','dtype': 'datetime64'},
     'sum_total_receipts': {'rename': 'TotalSum', 'dtype': 'float64'},
     'sum_beer_receipts': {'rename': 'BeerSum', 'dtype': 'float64'},
@@ -163,74 +178,22 @@ def func_df_data(cities, segment, retailer, start_date, end_date):
             
         except:
             pass
+    
 
     cols_keep = [cols[col]['rename'] for col in cols]
+
     df = df.rename(columns={col:cols[col]['rename'] for col in cols}).loc[:,cols_keep]
-    
-    # doing this to get rid of timezone formatting in dash datatable
-    # df = df.assign(
-    #     BegDate = pd.DatetimeIndex(df['BegDate']).strftime("%Y-%m-%d"),
-    #     EndDate = pd.DatetimeIndex(df['EndDate']).strftime("%Y-%m-%d")
-    # )
+    df = df.assign(
+        CountyDesc = lambda x: x['CountyNbr'].map(county_dict),
+        Rank = lambda x: x.index + 1,
+        BegDateStr = lambda x: x['BegDate'].dt.strftime('%Y-%m'),
+        EndDateStr = lambda x: x['EndDate'].dt.strftime('%Y-%m')
+        )
 
     return df
 
-df_data = func_df_data(cities=[], segment='TOTAL', retailer=None, start_date=start_date, end_date=end_date)
+df_data = func_df_data(counties=[], segment='TOTAL', retailer=None, start_date=start_date, end_date=end_date)
 
-# #%%
-
-# import plotly.offline as pyo
-# import plotly.graph_objs as go
-# import plotly as py
-
-# fig = go.Figure()
-
-
-# fig.add_trace(
-#     go.Bar(
-#         x=df_data.index+1,
-#         y=df_data["BeerSum"],
-#         name="BeerSum",
-#         text=df_data['LocName']
-#         )
-# )
-
-
-# fig.add_trace(
-#     go.Bar(
-#         x=df_data.index+1,
-#         y=df_data["LiqSum"],
-#         name="LiqSum",
-#         text=df_data['LocName']
-#         )
-# )
-
-# fig.add_trace(
-#     go.Bar(
-#         x=df_data.index+1,
-#         y=df_data["WineSum"],
-#         name="WineSum",
-#         text=df_data['LocName']
-#         )
-# )
-
-# fig.update_layout(
-#     go.Layout(
-#         title=dict(
-#             text='Total Receipts', y=0.9, x=0.5, xanchor="center", yanchor="top",
-#         ),
-#         barmode='stack',
-#         hovermode="closest",
-#         titlefont=dict(size=24, color="black"),
-#         xaxis={'categoryorder':'category ascending'},
-#         yaxis=dict(title="Total Receipts"),
-#         yaxis_tickprefix="$",
-#         yaxis_tickformat=",.",
-#         template="plotly_white",  # can try plotly, plotly_white, ggplot, ggplot
-#     )
-# )
-
-# fig.show()
 
 #%%
 app = dash.Dash(__name__)
@@ -251,10 +214,10 @@ app.layout = html.Div([
         "By default, the table shows the top 100 retailers, by total beverage gross receipts, for the state.",
     ]),
     html.Div([
-        html.Label(html.Strong('Select one or more cities:')),
+        html.Label(html.Strong('Select one or more counties:')),
         dcc.Dropdown(
-            id='selection-cities',
-            options=[{'label':city, 'value':city} for city in df_cities['City'].unique()],
+            id='selection-counties',
+            options=[{'label':CountyDesc, 'value':CountyNbr} for CountyNbr,CountyDesc in dict_df_counties.items()],
             value=[],
             multi=True,
             # style={'display': 'inline-block'}
@@ -292,12 +255,14 @@ app.layout = html.Div([
     dash_table.DataTable(
     id='table',
     columns=[
+        {'id': 'Rank', 'name': 'Rank', 'type': 'text'},
         {'id': 'LocName', 'name': 'Retailer Name', 'type': 'text'},
         {'id': 'Address', 'name': 'Address', 'type': 'text'},
         {'id': 'City', 'name': 'City', 'type': 'text'},
+        {'id': 'CountyDesc', 'name': 'County', 'type': 'text'},
         {'id': 'LicNbr', 'name': 'License', 'type': 'text'},
-        {'id': 'BegDate', 'name': 'Beg Date', 'type': 'datetime'},
-        {'id': 'EndDate', 'name': 'End Date', 'type': 'datetime'},
+        {'id': 'BegDateStr', 'name': 'Beg Date', 'type': 'datetime'},
+        {'id': 'EndDateStr', 'name': 'End Date', 'type': 'datetime'},
         {'id': 'TotalSum', 'name': 'Total $', 'type': 'numeric', 'format': FormatTemplate.money(0)},
         {'id': 'BeerSum', 'name': 'Beer $', 'type': 'numeric', 'format': FormatTemplate.money(0)},
         {'id': 'WineSum', 'name': 'Wine $', 'type': 'numeric', 'format': FormatTemplate.money(0)},
@@ -329,16 +294,16 @@ app.layout = html.Div([
 
 @app.callback(
     Output('table', 'data'),
-    [Input('selection-cities', 'value'),
+    [Input('selection-counties', 'value'),
      Input('selection-segment', 'value'),
      Input('selection-retailer', 'value'),
      Input('selection-date', 'start_date'),
      Input('selection-date', 'end_date')])
-def update_table(cities, segment, retailer, start_date, end_date):
+def update_table(counties, segment, retailer, start_date, end_date):
 
-    print('inside update table', cities, segment, retailer, start_date, end_date)
+    print('inside update table', counties, segment, retailer, start_date, end_date)
 
-    return func_df_data(cities, segment, retailer, start_date, end_date).to_dict('records')
+    return func_df_data(counties, segment, retailer, start_date, end_date).to_dict('records')
 
 if __name__ == '__main__':
     app.run_server(debug=False)
