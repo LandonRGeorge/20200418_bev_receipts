@@ -75,41 +75,10 @@ def func_df_counties_cities():
 df_counties_cities = func_df_counties_cities()
 dict_counties_df = df_counties_cities[['CountyNbr','CountyDesc']].drop_duplicates().set_index('CountyNbr').iloc[:,0].to_dict()
 
-#%%
-def func_cities_from_county_selection(df, counties):
-    """Return all possible cities that could be selected, based on what has been selected from counties"""
-
-    if counties:
-
-        cities = sorted(df[df['CountyNbr'].isin(counties)].loc[:,'City'].unique().tolist())
-
-    else:
-
-        cities = sorted(df['City'].unique().tolist())
-
-    return cities
-
-
-cities = func_cities_from_county_selection(df_counties_cities, counties=None)
-
 
 #%%
-def func_df_data(counties, segment, retailer, start_date, end_date):
+def func_query_data(counties, cities, segment, retailer, start_date, end_date):
     """Grab data from TX Comptroller API"""
-
-    segment_dict = ({
-        'TOTAL':'sum_total_receipts',
-        'BEER':'sum_beer_receipts',
-        'WINE':'sum_wine_receipts',
-        'LIQUOR':'sum_liquor_receipts'
-    })
-
-    text_counties = ''
-    for i, county in enumerate(counties):
-        text_temp = f"'{county}'"
-        if i != len(counties) - 1:
-            text_temp+=','
-        text_counties+=text_temp
 
     url_args_select_group_where = f"""
         $select=
@@ -135,39 +104,64 @@ def func_df_data(counties, segment, retailer, start_date, end_date):
         &$where=obligation_end_date_yyyymmdd between '{start_date}' and '{end_date}'
     """
 
-    if counties and retailer:
 
-        url_args_where_opt = f"""
-            and location_county in({text_counties})
-            and location_name like '%25{retailer.upper()}%25'
-        """
+    def func_url_args_where():
+        """Form a where clause for API query"""
 
-    elif counties:
+        def comma_sep_str_from_list(list_input):
+            """Return a comma and parantheses separated string from a list"""
 
-        url_args_where_opt = f"and location_county in({text_counties})"
+            list_input_sep_paren = [f"'{elem}'" for elem in list_input]
+            comma_sep_str =  ','.join(list_input_sep_paren)
 
-
-    elif retailer:
-
-        url_args_where_opt = f"and location_name like '%25{retailer.upper()}%25'"
+            return comma_sep_str
 
 
-    else:
+        url_args_where_list = []
+        
+        if counties:
 
-        url_args_where_opt = ""
+            url_args_where_list.append(f"location_county in({comma_sep_str_from_list(counties)})")
+            
+        if cities:
 
-    url_args_order_limit = f'&$order={segment_dict[segment]} DESC' + '&$limit=100'
+            url_args_where_list.append(f"location_city in({comma_sep_str_from_list(cities)})")
+        
+    
+        if retailer:
 
-    url_args = url_args_select_group_where + url_args_where_opt + url_args_order_limit
+            url_args_where_list.append(f"location_name like '%25{retailer.upper()}%25'")
+
+        url_args_where_str = ' and '.join(url_args_where_list)
+
+        if url_args_where_str:
+
+            url_args_where_str = 'and ' + url_args_where_str
+
+        return url_args_where_str
+
+
+    url_args_where = func_url_args_where()
+
+    url_args_order = f'&$order={segment} DESC'
+    url_args_limit = '&$limit=100'
+
+    url_args = url_args_select_group_where + url_args_where + url_args_order + url_args_limit
     url_args = re.sub(r'\n\s*', '', url_args).replace(' ', '%20')
 
     url_full = url_base + url_args
 
-    print(url_full)
+    return url_full
+
+query_data = func_query_data(counties=[], cities=[], segment='sum_total_receipts', retailer=None, start_date=start_date, end_date=end_date)
+
+
+def func_df_data(query_data):
+    """Form dataframe from API query"""
 
     df = (
         pd.read_json(
-            url_full, 
+            query_data, 
             convert_dates=['min_obligation_end_date_yyyymmdd', 'max_obligation_end_date_yyyymmdd']
         )
     )
@@ -209,7 +203,7 @@ def func_df_data(counties, segment, retailer, start_date, end_date):
 
     return df
 
-df_data = func_df_data(counties=[], segment='TOTAL', retailer=None, start_date=start_date, end_date=end_date)
+df_data = func_df_data(query_data)
 
 
 #%%
@@ -231,6 +225,20 @@ app.layout = html.Div([
         "By default, the table shows the top 100 retailers, by total beverage gross receipts, for the state.",
     ]),
     html.Div([
+
+        html.Label(html.Strong('Select a segment to sort gross receipts by:')),
+        dcc.RadioItems(
+            id='selection-segment',
+            options=[
+                {'label':'Total', 'value':'sum_total_receipts'},
+                {'label':'Beer', 'value':'sum_beer_receipts'},
+                {'label':'Wine', 'value':'sum_wine_receipts'},
+                {'label':'Liquor', 'value':'sum_liquor_receipts'}],
+            value='sum_total_receipts',
+            # labelStyle={'display': 'inline-block'}
+        ),
+        html.Br(),
+
         html.Label(html.Strong('Select one or more counties:')),
         dcc.Dropdown(
             id='selection-counties',
@@ -240,29 +248,22 @@ app.layout = html.Div([
             # style={'display': 'inline-block'}
         ),
         html.Br(),
+
         html.Label(html.Strong('Select one or more cities:')),
         dcc.Dropdown(
             id='selection-cities',
+            value=[],
             multi=True,
         ),
         html.Br(),
-        html.Label(html.Strong('Select a segment to sort gross receipts by:')),
-        dcc.RadioItems(
-            id='selection-segment',
-            options=[
-                {'label':'Total', 'value':'TOTAL'},
-                {'label':'Beer', 'value':'BEER'},
-                {'label':'Wine', 'value':'WINE'},
-                {'label':'Liquor', 'value':'LIQUOR'}],
-            value='TOTAL',
-            # labelStyle={'display': 'inline-block'}
-        ),
-        html.Br(),
+
+
         html.Label(html.Strong('Search for a retailer by name (must hit `enter`):')),
         html.Br(),
         dcc.Input(id="selection-retailer", type="text", placeholder="", debounce=True),
         html.Br(),
         html.Br(),
+
         html.Label(html.Strong('Pick a date range:')),
         html.Br(),
         dcc.DatePickerRange(
@@ -273,6 +274,7 @@ app.layout = html.Div([
             end_date_placeholder_text="End Period",
             calendar_orientation='horizontal',
         )
+
     ]),
     html.Br(),
     dash_table.DataTable(
@@ -281,8 +283,8 @@ app.layout = html.Div([
         {'id': 'Rank', 'name': 'Rank', 'type': 'text'},
         {'id': 'LocName', 'name': 'Retailer Name', 'type': 'text'},
         {'id': 'Address', 'name': 'Address', 'type': 'text'},
-        {'id': 'City', 'name': 'City', 'type': 'text'},
         {'id': 'CountyDesc', 'name': 'County', 'type': 'text'},
+        {'id': 'City', 'name': 'City', 'type': 'text'},
         {'id': 'LicNbr', 'name': 'License', 'type': 'text'},
         {'id': 'BegDateStr', 'name': 'Beg Date', 'type': 'datetime'},
         {'id': 'EndDateStr', 'name': 'End Date', 'type': 'datetime'},
@@ -318,25 +320,35 @@ app.layout = html.Div([
 @app.callback(
     Output('table', 'data'),
     [Input('selection-counties', 'value'),
+     Input('selection-cities', 'value'),
      Input('selection-segment', 'value'),
      Input('selection-retailer', 'value'),
      Input('selection-date', 'start_date'),
      Input('selection-date', 'end_date')])
-def update_table(counties, segment, retailer, start_date, end_date):
+def update_table(counties, cities, segment, retailer, start_date, end_date):
+    """Update datatable"""
 
-    print('inside update table', counties, segment, retailer, start_date, end_date)
+    query_data = func_query_data(counties, cities, segment, retailer, start_date, end_date)
 
-    return func_df_data(counties, segment, retailer, start_date, end_date).to_dict('records')
+    return func_df_data(query_data).to_dict('records')
 
 
 @app.callback(
     Output('selection-cities', 'options'),
     [Input('selection-counties', 'value')])
-def update_cities(counties):
+def set_display_cities(counties, df=df_counties_cities):
+    """Return all possible cities that could be selected, based on what has been selected from counties"""    
 
-    cities = func_cities_from_county_selection(df_counties_cities, counties)
+    if counties:
+
+        cities = sorted(df[df['CountyNbr'].isin(counties)].loc[:,'City'].unique().tolist())
+
+    else:
+
+        cities = sorted(df['City'].unique().tolist())
 
     return [{'label':city, 'value':city} for city in cities]
 
+
 if __name__ == '__main__':
-    app.run_server(debug=True)
+    app.run_server(debug=False)
