@@ -397,4 +397,4 @@ def set_display_cities(counties, df=df_counties_cities):
 
 
 if __name__ == '__main__':
-    app.run_server(debug=True)
+    app.run_server(debug=False)
