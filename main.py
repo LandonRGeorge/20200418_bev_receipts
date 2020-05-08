@@ -144,7 +144,7 @@ def func_query_data(counties, cities, segment, retailer, start_date, end_date):
     url_args_where = func_url_args_where()
 
     url_args_order = f'&$order={segment} DESC'
-    url_args_limit = '&$limit=1000'
+    url_args_limit = '&$limit=100'
 
     url_args = url_args_select_group_where + url_args_where + url_args_order + url_args_limit
     url_args = re.sub(r'\n\s*', '', url_args).replace(' ', '%20')
@@ -212,10 +212,9 @@ def data_bars(df, column, segment):
 
     # color selected segment a certain color; non-selected columns take a different color
     if column == segment:
-        color = '#5CDB95'
-        # color = '#0074D9' #blue
+        color = '#04B404'
     else:
-        color = '#cef4df'
+        color = '#9AE19A'
 
     n_bins = 100
     bounds = [i * (1.0 / n_bins) for i in range(n_bins + 1)]
@@ -321,10 +320,10 @@ app.layout = html.Div([
     id='table',
     columns=[
         {'id': 'Rank', 'name': '', 'type': 'text'},
-        {'id': 'LocName', 'name': 'Retailer Name', 'type': 'text'},
-        {'id': 'Address', 'name': 'Address', 'type': 'text'},
         {'id': 'CountyDesc', 'name': 'County', 'type': 'text'},
         {'id': 'City', 'name': 'City', 'type': 'text'},
+        {'id': 'LocName', 'name': 'Retailer Name', 'type': 'text'},
+        {'id': 'Address', 'name': 'Address', 'type': 'text'},
         {'id': 'LicNbr', 'name': 'License', 'type': 'text'},
         {'id': 'BegDateStr', 'name': 'Beg Date', 'type': 'datetime'},
         {'id': 'EndDateStr', 'name': 'End Date', 'type': 'datetime'},
@@ -348,7 +347,7 @@ app.layout = html.Div([
         'color': 'white',
         'fontWeight': 'bold'
     },
-    style_as_list_view=True,
+    # style_as_list_view=True,
 )
 ])
 
